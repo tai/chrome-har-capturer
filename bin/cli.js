@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 'use strict';
 
+const fs = require('fs');
 const chalk = require('chalk');
 const program = require('commander');
 
@@ -18,6 +19,7 @@ program
     .option('-g, --grace <ms>', 'time to wait after the load event')
     .option('-u, --timeout <ms>', 'time to wait before giving up with a URL')
     .option('-l, --parallel <n>', 'load <n> URLs in parallel')
+    .option('-J, --jar <file>', 'use given cookie jar file')
     .parse(process.argv);
 
 if (program.args.length === 0) {
@@ -48,6 +50,27 @@ async function preHook(url, client) {
     const userAgent = program.agent;
     if (typeof userAgent === 'string') {
         await Network.setUserAgentOverride({userAgent});
+    }
+
+    // load cookies
+    const jar = program.jar;
+    if (jar) {
+        fs.readFile(jar, (err, data) => {
+            if (err) {
+                if (err.code != 'ENOENT') throw err;
+               return;
+            }
+
+            const cookies = JSON.parse(data.toString());
+            for (let i = 0; i < cookies.length; i++) {
+                const ck = cookies[i];
+                // Set dummy URL to prevent "Invalid parameters" error.
+                // This is done as cookies saved by getAllCookies() are
+                // not compatible with setCookie()...
+                if (! ck['url']) ck['url'] = '';
+                Network.setCookie(ck);
+            }
+        });
     }
 }
 
