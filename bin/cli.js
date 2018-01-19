@@ -7,6 +7,11 @@ const program = require('commander');
 
 const CHC = require('..');
 
+function append(value, array) {
+    array.push(value);
+    return array;
+}
+
 program
     .usage('[options] URL...')
     .option('-t, --host <host>', 'Chrome Debugging Protocol host')
@@ -16,6 +21,9 @@ program
     .option('-o, --output <file>', 'write to file instead of stdout')
     .option('-c, --content', 'also capture the requests body')
     .option('-a, --agent <agent>', 'user agent override')
+    .option('-b, --block <URL>', 'URL pattern (*) to block (can be repeated)', append, [])
+    .option('-H, --header <header>', 'Additional headers (can be repeated)', append, [])
+    .option('-i, --insecure', 'ignore certificate errors')
     .option('-g, --grace <ms>', 'time to wait after the load event')
     .option('-u, --timeout <ms>', 'time to wait before giving up with a URL')
     .option('-l, --parallel <n>', 'load <n> URLs in parallel')
@@ -45,14 +53,38 @@ function log(string) {
 }
 
 async function preHook(url, client) {
-    const {Network} = client;
+    const {Network, Security} = client;
+    // optionally ignore certificate errors
+    if (program.insecure) {
+        await Security.enable();
+        await Security.setOverrideCertificateErrors({override: true});
+        Security.certificateError(({eventId}) => {
+            Security.handleCertificateError({eventId, action: 'continue'});
+        });
+    }
     // optionally set user agent
     const userAgent = program.agent;
     if (typeof userAgent === 'string') {
         await Network.setUserAgentOverride({userAgent});
     }
-
-    // load cookies
+    // optionally block URLs
+    if (program.block) {
+        await Network.setBlockedURLs({urls: program.block});
+    }
+    // optionally add extra headers
+    if (program.header) {
+        const headers = {};
+        // convert to object
+        program.header.forEach((header) => {
+            const match = header.match(/([^:]+): *(.*)/);
+            if (match) {
+                const [_, name, value] = match;
+                headers[name] = value;
+            }
+        });
+        await Network.setExtraHTTPHeaders({headers});
+    }
+    // optionally load cookies
     const jar = program.jar;
     if (jar) {
         fs.readFile(jar, (err, data) => {
